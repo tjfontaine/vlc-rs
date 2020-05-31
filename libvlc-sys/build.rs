@@ -19,10 +19,20 @@ fn main() {
         .whitelist_function("vsnprintf")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks));
 
-    // Set header include paths
-    let pkg_config_library = pkg_config::Config::new().probe("libvlc").unwrap();
-    for include_path in &pkg_config_library.include_paths {
-        bindings = bindings.clang_arg(format!("-I{}", include_path.display()));
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Set header include paths
+        let pkg_config_library = pkg_config::Config::new().probe("libvlc").unwrap();
+        for include_path in &pkg_config_library.include_paths {
+            bindings = bindings.clang_arg(format!("-I{}", include_path.display()));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        println!(r"cargo:rustc-link-lib=vlc");
+        println!(r"cargo:rustc-link-search=/Applications/VLC.app/Contents/MacOS/lib");
+        bindings = bindings.clang_arg("-I/Applications/VLC.app/Contents/MacOS/include");
     }
 
     let bindings = bindings.generate().expect("Unable to generate bindings");
