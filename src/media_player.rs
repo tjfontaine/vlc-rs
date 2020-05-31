@@ -119,6 +119,34 @@ impl MediaPlayer {
         }
     }
 
+    pub fn set_video_callbacks<F>(
+        &self,
+        lock: F,
+        unlock: Option<Box<dyn Fn(*mut c_void, *const *mut c_void) + Send + 'static>>,
+        display: Option<Box<dyn Fn(*mut c_void) + Send + 'static>>)
+        where F: Fn(*const *mut c_void) -> *mut c_void + Send + 'static,
+    {
+        let flag_unlock = unlock.is_some();
+        let flag_display = display.is_some();
+
+        let data = VideoCallbacksData {
+            lock: Box::new(lock),
+            unlock: unlock,
+            display: display,
+        };
+
+        let data = Box::into_raw(Box::new(data));
+
+        unsafe{
+            sys::libvlc_video_set_callbacks(
+                self.ptr,
+                Some(video_cb_lock),
+                if flag_unlock {Some(video_cb_unlock)} else {None},
+                if flag_display {Some(video_cb_display)} else {None},
+                data as *mut c_void);
+        }
+    }
+
     /// Set the NSView handler where the media player should render its video output.
     pub fn set_nsobject(&self, drawable: *mut c_void) {
         unsafe{ sys::libvlc_media_player_set_nsobject(self.ptr, drawable) };
@@ -360,6 +388,29 @@ unsafe extern "C" fn audio_cb_flush(data: *mut c_void, pts: i64) {
 unsafe extern "C" fn audio_cb_drain(data: *mut c_void) {
     let data: &AudioCallbacksData = transmute(data as *mut AudioCallbacksData);
     (data.drain.as_ref().unwrap())();
+}
+
+// For video_set_callbacks
+struct VideoCallbacksData {
+    lock: Box<dyn Fn(*const *mut c_void) -> *mut c_void + Send + 'static>,
+    unlock: Option<Box<dyn Fn(*mut c_void, *const *mut c_void) + Send + 'static>>,
+    display: Option<Box<dyn Fn(*mut c_void) + Send + 'static>>,
+}
+
+unsafe extern "C" fn video_cb_lock(data: *mut c_void, planes: *mut *mut c_void) -> *mut c_void {
+    let data: &VideoCallbacksData = transmute(data as *mut VideoCallbacksData);
+    return (data.lock)(planes);
+}
+
+unsafe extern "C" fn video_cb_unlock(
+    data: *mut c_void, picture: *mut c_void, planes: *const *mut c_void) {
+    let data: &VideoCallbacksData = transmute(data as *mut VideoCallbacksData);
+    (data.unlock.as_ref().unwrap())(picture, planes);
+}
+
+unsafe extern "C" fn video_cb_display(data: *mut c_void, picture: *mut c_void) {
+    let data: &VideoCallbacksData = transmute(data as *mut VideoCallbacksData);
+    (data.display.as_ref().unwrap())(picture);
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
